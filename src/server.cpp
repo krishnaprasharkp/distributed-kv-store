@@ -1,37 +1,41 @@
 // ============================================================
-// Phase 2: Multi-threaded In-Memory Key-Value Store
+// Phase 3: Multi-threaded LRU Cache Server with TTL
 // ============================================================
-// What changed from Phase 1:
-//   - The main loop no longer handles a client directly.
-//     Instead, for every accepted connection, it spawns a NEW
-//     thread to handle that client, then immediately goes back
-//     to accept()-ing the next one. This lets multiple clients
-//     be served AT THE SAME TIME.
-//   - Since multiple threads now read/write the shared `store`
-//     map concurrently, every access to `store` is protected by
-//     a std::mutex to prevent race conditions / data corruption.
+// What changed from Phase 2:
+//   - The plain std::unordered_map<string,string> `store` is
+//     replaced by the LRUCache class (lru_cache.h), which adds:
+//       - a max capacity, with automatic eviction of the least
+//         recently used key when full
+//       - optional per-key TTL (expiry)
+//   - The command protocol grows slightly:
+//       SET <key> <value>              (no expiry)
+//       SET <key> <value> EX <seconds> (expires after N seconds)
+//       GET <key>
+//       DEL <key>
+//   - LRUCache does its OWN internal locking (see lru_cache.h),
+//     so this file no longer needs its own storeMutex - the
+//     thread-safety responsibility has moved into the cache class
+//     itself, which is a cleaner design (the cache is safe to use
+//     from any thread, on its own, without callers remembering to
+//     lock anything).
 // ============================================================
 
 #include <iostream>
 #include <string>
 #include <sstream>
-#include <unordered_map>
-#include <thread>          // NEW: std::thread
-#include <mutex>           // NEW: std::mutex, std::lock_guard
+#include <thread>
 #include <vector>
 #include <cstring>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include "lru_cache.h"
 
-std::unordered_map<std::string, std::string> store;
-
-// NEW: this mutex protects `store`. ANY code that reads or
-// writes `store` must hold this lock first. Without it, two
-// threads modifying the hashmap at the same time can corrupt
-// its internal structure (not just "wrong value" -- potential
-// crash, since unordered_map isn't thread-safe by default).
-std::mutex storeMutex;
+// NEW: capacity is now a fixed limit, not "grow forever" like
+// Phase 1/2's plain hashmap. 1000 keys chosen as a reasonable
+// default for local testing - real Redis-like systems make this
+// configurable, but a constant is fine for our purposes.
+LRUCache cache(1000);
 
 std::string handleCommand(const std::string& line) {
     std::istringstream iss(line);
@@ -39,36 +43,45 @@ std::string handleCommand(const std::string& line) {
     iss >> cmd >> key;
 
     if (cmd == "SET") {
-        std::getline(iss, value);
-        if (!value.empty() && value[0] == ' ') value.erase(0, 1);
+        // Read the rest of the line so values can contain spaces.
+        std::string rest;
+        std::getline(iss, rest);
+        if (!rest.empty() && rest[0] == ' ') rest.erase(0, 1);
 
-        // NEW: lock before touching the shared map.
-        // lock_guard automatically unlocks when it goes out of
-        // scope (end of this if-block) -- even if an exception
-        // were thrown, so we can't accidentally forget to unlock.
-        std::lock_guard<std::mutex> lock(storeMutex);
-        store[key] = value;
+        // NEW: check if the value ends with " EX <seconds>" - a
+        // simple way to let SET optionally specify a TTL, e.g.:
+        //   SET session123 abc123 EX 60
+        long ttl = 0;
+        size_t exPos = rest.rfind(" EX ");
+        if (exPos != std::string::npos) {
+            std::string ttlStr = rest.substr(exPos + 4);
+            try {
+                ttl = std::stol(ttlStr);
+                value = rest.substr(0, exPos); // strip " EX <seconds>" off the value
+            } catch (...) {
+                value = rest; // if parsing fails, treat the whole thing as the value
+            }
+        } else {
+            value = rest;
+        }
+
+        cache.set(key, value, ttl);
         return "OK\n";
     }
     else if (cmd == "GET") {
-        std::lock_guard<std::mutex> lock(storeMutex);
-        auto it = store.find(key);
-        if (it == store.end()) return "(nil)\n";
-        return it->second + "\n";
+        auto result = cache.get(key);
+        if (!result.has_value()) return "(nil)\n";
+        return result.value() + "\n";
     }
     else if (cmd == "DEL") {
-        std::lock_guard<std::mutex> lock(storeMutex);
-        size_t erased = store.erase(key);
-        return erased ? "OK\n" : "(nil)\n";
+        bool removed = cache.remove(key);
+        return removed ? "OK\n" : "(nil)\n";
     }
     else {
         return "ERROR: unknown command\n";
     }
 }
 
-// NEW: this function is what each thread runs. It's basically
-// the exact same client-handling loop from Phase 1's main(),
-// just moved into its own function so std::thread can call it.
 void handleClient(int client_fd) {
     std::cout << "Client connected on thread " << std::this_thread::get_id() << "\n";
 
@@ -113,16 +126,13 @@ int main() {
         return 1;
     }
 
-    if (listen(server_fd, 10) < 0) {  // increased backlog since we now expect more concurrent connections
+    if (listen(server_fd, 10) < 0) {
         std::cerr << "Listen failed\n";
         return 1;
     }
 
-    std::cout << "Multi-threaded KV store listening on port " << PORT << "...\n";
+    std::cout << "LRU KV store (capacity=1000) listening on port " << PORT << "...\n";
 
-    // NEW: keep track of every thread we spawn, so we could join
-    // them on shutdown if we wanted a clean exit (not critical
-    // for this project, but good practice to know about).
     std::vector<std::thread> threads;
 
     while (true) {
@@ -134,16 +144,7 @@ int main() {
             continue;
         }
 
-        // NEW: this is the core change. Instead of calling
-        // handleClient(client_fd) directly here (which would
-        // block this loop until that client disconnects), we
-        // spawn a NEW thread to run it, and immediately loop
-        // back to accept() the next client.
         threads.emplace_back(handleClient, client_fd);
-
-        // NEW: detach lets this thread run independently -- we
-        // don't need to manually join() it later, since we don't
-        // know in advance when each client will disconnect.
         threads.back().detach();
     }
 
