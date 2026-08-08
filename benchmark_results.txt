@@ -1,0 +1,40 @@
+Benchmarking with 1 threads, 5000 requests/thread (5000 total ops)...
+
+--- Results ---
+Total time:       0.2324 sec
+Successful ops:   5000
+Throughput:       21514 ops/sec
+Avg latency:      45.4787 us
+p50 latency:      40.657 us
+p95 latency:      70.584 us
+p99 latency:      112.183 us
+Benchmarking with 2 threads, 5000 requests/thread (10000 total ops)...
+
+--- Results ---
+Total time:       0.237313 sec
+Successful ops:   10000
+Throughput:       42138 ops/sec
+Avg latency:      46.2962 us
+p50 latency:      44.756 us
+p95 latency:      51.753 us
+p99 latency:      79.992 us
+Benchmarking with 4 threads, 5000 requests/thread (20000 total ops)...
+
+--- Results ---
+Total time:       0.351162 sec
+Successful ops:   20000
+Throughput:       56953 ops/sec
+Avg latency:      65.8893 us
+p50 latency:      59.255 us
+p95 latency:      118.818 us
+p99 latency:      152.395 us
+Benchmarking with 8 threads, 5000 requests/thread (40000 total ops)...
+
+--- Results ---
+Total time:       0.455302 sec
+Successful ops:   40000
+Throughput:       87853 ops/sec
+Avg latency:      86.9902 us
+p50 latency:      70.319 us
+p95 latency:      150.902 us
+p99 latency:      229.925 us
