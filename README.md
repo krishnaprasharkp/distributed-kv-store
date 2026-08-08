@@ -1,4 +1,4 @@
-# Distributed Key-Value Store (C++)
+# Multithreaded-kv-store (C++)
 
 A multi-threaded, in-memory key-value store built from scratch in C++ — inspired by Redis. Built to demonstrate systems-level engineering: TCP networking, concurrency, thread-safe data structures, and performance benchmarking/optimization.
 
