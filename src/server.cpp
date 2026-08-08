@@ -1,26 +1,3 @@
-// ============================================================
-// Phase 5: Multi-threaded, Sharded LRU Cache Server with TTL
-// ============================================================
-// (See sharded_cache.h for the shard-splitting logic itself -
-// this file only changed by swapping LRUCache for ShardedLRUCache.)
-// What changed from Phase 2:
-//   - The plain std::unordered_map<string,string> `store` is
-//     replaced by the LRUCache class (lru_cache.h), which adds:
-//       - a max capacity, with automatic eviction of the least
-//         recently used key when full
-//       - optional per-key TTL (expiry)
-//   - The command protocol grows slightly:
-//       SET <key> <value>              (no expiry)
-//       SET <key> <value> EX <seconds> (expires after N seconds)
-//       GET <key>
-//       DEL <key>
-//   - LRUCache does its OWN internal locking (see lru_cache.h),
-//     so this file no longer needs its own storeMutex - the
-//     thread-safety responsibility has moved into the cache class
-//     itself, which is a cleaner design (the cache is safe to use
-//     from any thread, on its own, without callers remembering to
-//     lock anything).
-// ============================================================
 
 #include <iostream>
 #include <string>
@@ -33,11 +10,8 @@
 #include <sys/socket.h>
 #include "sharded_cache.h"
 
-// NEW: capacity is now a fixed limit, not "grow forever" like
-// Phase 1/2's plain hashmap. 1000 keys chosen as a reasonable
-// default for local testing - real Redis-like systems make this
-// configurable, but a constant is fine for our purposes.
-ShardedLRUCache cache(1000, 16); // 1000 total capacity, split across 16 shards
+
+ShardedLRUCache cache(1000, 16); 
 
 std::string handleCommand(const std::string& line) {
     std::istringstream iss(line);
@@ -45,23 +19,20 @@ std::string handleCommand(const std::string& line) {
     iss >> cmd >> key;
 
     if (cmd == "SET") {
-        // Read the rest of the line so values can contain spaces.
+    
         std::string rest;
         std::getline(iss, rest);
         if (!rest.empty() && rest[0] == ' ') rest.erase(0, 1);
 
-        // NEW: check if the value ends with " EX <seconds>" - a
-        // simple way to let SET optionally specify a TTL, e.g.:
-        //   SET session123 abc123 EX 60
         long ttl = 0;
         size_t exPos = rest.rfind(" EX ");
         if (exPos != std::string::npos) {
             std::string ttlStr = rest.substr(exPos + 4);
             try {
                 ttl = std::stol(ttlStr);
-                value = rest.substr(0, exPos); // strip " EX <seconds>" off the value
+                value = rest.substr(0, exPos); 
             } catch (...) {
-                value = rest; // if parsing fails, treat the whole thing as the value
+                value = rest; 
             }
         } else {
             value = rest;
