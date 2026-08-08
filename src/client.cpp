@@ -1,8 +1,3 @@
-// ============================================================
-// Simple test client — connects to the KV store and lets you
-// type commands interactively (SET/GET/DEL).
-// ============================================================
-
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -23,7 +18,6 @@ int main() {
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(PORT);
 
-    // Connect to localhost (127.0.0.1)
     if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) {
         std::cerr << "Invalid address\n";
         return 1;
