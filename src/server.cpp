@@ -1,6 +1,8 @@
 // ============================================================
-// Phase 3: Multi-threaded LRU Cache Server with TTL
+// Phase 5: Multi-threaded, Sharded LRU Cache Server with TTL
 // ============================================================
+// (See sharded_cache.h for the shard-splitting logic itself -
+// this file only changed by swapping LRUCache for ShardedLRUCache.)
 // What changed from Phase 2:
 //   - The plain std::unordered_map<string,string> `store` is
 //     replaced by the LRUCache class (lru_cache.h), which adds:
@@ -29,13 +31,13 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
-#include "lru_cache.h"
+#include "sharded_cache.h"
 
 // NEW: capacity is now a fixed limit, not "grow forever" like
 // Phase 1/2's plain hashmap. 1000 keys chosen as a reasonable
 // default for local testing - real Redis-like systems make this
 // configurable, but a constant is fine for our purposes.
-LRUCache cache(1000);
+ShardedLRUCache cache(1000, 16); // 1000 total capacity, split across 16 shards
 
 std::string handleCommand(const std::string& line) {
     std::istringstream iss(line);
@@ -131,7 +133,7 @@ int main() {
         return 1;
     }
 
-    std::cout << "LRU KV store (capacity=1000) listening on port " << PORT << "...\n";
+    std::cout << "Sharded LRU KV store (capacity=1000, shards=16) listening on port " << PORT << "...\n";
 
     std::vector<std::thread> threads;
 
