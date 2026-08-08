@@ -1,33 +1,4 @@
-// ============================================================
-// Phase 4: Benchmarking Harness
-// ============================================================
-// A separate program (NOT part of the server/client) that
-// measures the real performance of the running KV store.
-//
-// How it works:
-//   - Spawns N "worker" threads, each opening its OWN TCP
-//     connection to the server (mirrors how real concurrent
-//     clients behave - separate connections, not one shared one)
-//   - Each worker fires M SET/GET requests back-to-back, timing
-//     EVERY individual request
-//   - After all workers finish, we combine all the individual
-//     timings and compute:
-//       - total throughput (ops/sec across ALL threads combined)
-//       - average latency
-//       - p50 / p95 / p99 latency (percentiles - see note below)
-//
-// Why percentiles, not just average latency?
-//   Average latency hides outliers. If 95% of requests take 1ms
-//   but 5% take 200ms (e.g. due to lock contention), the AVERAGE
-//   might look fine (~11ms) while real users experience a much
-//   worse "tail" of slow requests. p95/p99 expose that tail.
-//   p99 = "99% of requests were faster than this number."
-//
-// Usage:
-//   ./benchmark <num_threads> <requests_per_thread>
-//   e.g. ./benchmark 8 5000
-//        -> 8 threads, each firing 5000 requests = 40,000 total ops
-// ============================================================
+
 
 #include <iostream>
 #include <string>
@@ -43,7 +14,6 @@
 
 using Clock = std::chrono::steady_clock;
 
-// Connects to the server. Returns the socket fd, or -1 on failure.
 int connectToServer() {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) return -1;
@@ -60,8 +30,7 @@ int connectToServer() {
     return sock;
 }
 
-// Sends one command and waits for the response. Returns the
-// elapsed time in microseconds for JUST this round-trip.
+
 double sendAndTime(int sock, const std::string& command) {
     char buffer[1024];
     std::string msg = command + "\n";
@@ -75,11 +44,7 @@ double sendAndTime(int sock, const std::string& command) {
     return std::chrono::duration<double, std::micro>(end - start).count();
 }
 
-// What each worker thread runs. Fires `requestsPerThread` SET/GET
-// requests, alternating between them, and records each request's
-// latency into `latencies` (this thread's own slice of the shared
-// results vector, indexed so threads never write to the same
-// location - no locking needed for this part).
+
 void worker(int threadId, int requestsPerThread, std::vector<double>& latencies, std::atomic<int>& successCount) {
     int sock = connectToServer();
     if (sock < 0) {
@@ -89,8 +54,7 @@ void worker(int threadId, int requestsPerThread, std::vector<double>& latencies,
 
     for (int i = 0; i < requestsPerThread; i++) {
         std::string key = "bench_key_" + std::to_string(threadId) + "_" + std::to_string(i % 100);
-        // Alternate SET and GET to exercise both paths, similar to
-        // a realistic mixed read/write workload.
+      
         double latency;
         if (i % 2 == 0) {
             latency = sendAndTime(sock, "SET " + key + " value" + std::to_string(i));
@@ -104,8 +68,7 @@ void worker(int threadId, int requestsPerThread, std::vector<double>& latencies,
     close(sock);
 }
 
-// Computes the value at a given percentile from a SORTED vector.
-// e.g. percentile(sorted, 0.95) = p95 latency.
+
 double percentile(const std::vector<double>& sorted, double p) {
     if (sorted.empty()) return 0.0;
     size_t idx = static_cast<size_t>(p * (sorted.size() - 1));
@@ -123,9 +86,7 @@ int main(int argc, char* argv[]) {
               << requestsPerThread << " requests/thread "
               << "(" << (numThreads * requestsPerThread) << " total ops)...\n";
 
-    // Each thread gets its own pre-sized slice of a results matrix,
-    // so no synchronization is needed while writing results - only
-    // when we merge them afterward.
+   
     std::vector<std::vector<double>> perThreadLatencies(numThreads, std::vector<double>(requestsPerThread));
     std::atomic<int> successCount{0};
     std::vector<std::thread> threads;
@@ -142,7 +103,6 @@ int main(int argc, char* argv[]) {
     auto overallEnd = Clock::now();
     double totalSeconds = std::chrono::duration<double>(overallEnd - overallStart).count();
 
-    // Merge all threads' latency measurements into one big list.
     std::vector<double> allLatencies;
     for (auto& threadLatencies : perThreadLatencies) {
         allLatencies.insert(allLatencies.end(), threadLatencies.begin(), threadLatencies.end());
